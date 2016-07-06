@@ -18,10 +18,17 @@ import (
 	"strings"
 
 	"github.com/apparentlymart/go-cidr/cidr"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/hil/ast"
 	"github.com/mitchellh/go-homedir"
 )
+
+// Match for S3-style URLs
+var reS3Match = regexp.MustCompile(`^s3://([^/]+)/(.+)$`)
+
 
 // Funcs is the mapping of built-in functions for configuration.
 func Funcs() map[string]ast.Function {
@@ -53,6 +60,7 @@ func Funcs() map[string]ast.Function {
 		"split":        interpolationFuncSplit(),
 		"trimspace":    interpolationFuncTrimSpace(),
 		"upper":        interpolationFuncUpper(),
+		"remotefile":   interpolationFuncRemoteFile(),
 	}
 }
 
@@ -710,6 +718,37 @@ func interpolationFuncUUID() ast.Function {
 		ReturnType: ast.TypeString,
 		Callback: func(args []interface{}) (interface{}, error) {
 			return uuid.GenerateUUID()
+		},
+	}
+}
+
+// fetches a file from a virtual remote
+// currently only supports s3:// URIs
+func interpolationFuncRemoteFile() ast.Function {
+	return ast.Function{
+		ArgTypes:   []ast.Type{ast.TypeString},
+		ReturnType: ast.TypeString,
+		Callback: func(args []interface{}) (interface{}, error) {
+			s := args[0].(string)
+			uriParts := reS3Match.FindAllStringSubmatch(s, 1)
+			if len(uriParts) == 0 {
+				return nil, fmt.Errorf("failed to parse s3-uri from '%s'", s)
+			}
+
+			s3svc := s3.New(session.New(), &aws.Config{Region: aws.String("eu-west-1")})
+			s3obj, err := s3svc.GetObject(&s3.GetObjectInput{
+				Bucket: aws.String(uriParts[0][1]),
+				Key:    aws.String(uriParts[0][2]),
+			})
+
+			if err != nil { // s3 fetch failed
+				return nil, err
+			}
+
+			// Slurp reader data into buffer as we are returning a full string
+			buf := new(bytes.Buffer)
+			buf.ReadFrom(s3obj.Body)
+			return buf.String(), nil
 		},
 	}
 }
