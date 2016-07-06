@@ -29,7 +29,6 @@ import (
 // Match for S3-style URLs
 var reS3Match = regexp.MustCompile(`^s3://([^/]+)/(.+)$`)
 
-
 // Funcs is the mapping of built-in functions for configuration.
 func Funcs() map[string]ast.Function {
 	return map[string]ast.Function{
